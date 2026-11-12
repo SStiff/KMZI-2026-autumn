@@ -1,3 +1,4 @@
+
 #include "constant_time.hpp"
 #include "gost_protocols.hpp"
 
@@ -21,24 +22,17 @@ int main() {
     const std::string Q_HEX = "400000000000000000000000000000000FD8CDDFC87B6635C115AF556C360C67";
     const std::string GX_HEX = "91E38443A5E82C0D880923425712B2BB658B9196932E02C78B2582FE742DAA28";
     const std::string GY_HEX = "32879423AB1A0375895786C4BB46E9565FDE0B5344766740AF268ADB32322E5C";
-
     const std::string MESSAGE_HEX = "54657374206D65737361676520666F7220474F53542033342E31302D32303132";
-    const std::string HASH_HEX = "2A1C6E8F4B7D90A12233445566778899AABBCCDDEEFF00112233445566778899";
-    const std::string DA_HEX = "1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDE";
-    const std::string DB_HEX = "234567890ABCDEF1234567890ABCDEF1234567890ABCDEF1234567890ABCDEF";
-    const std::string D_HEX = "1111111111111111111111111111111111111111111111111111111111111111";
-    const std::string K_HEX = "3333333333333333333333333333333333333333333333333333333333333333";
 
     const EllipticCurve curve(P_HEX, A_HEX, B_HEX, Q_HEX, GX_HEX, GY_HEX);
     const GostProtocols gost(curve);
 
-    const AffinePoint Gaff = curve.toAffine(curve.generator());
-    if (!curve.isOnCurveAffine(Gaff)) {
+    if (!curve.isOnCurveAffine(curve.toAffine(curve.generator()))) {
         throw std::runtime_error("Generator is not on curve");
     }
 
-    const BigInt dA = BigIntUtils::fromHex(DA_HEX);
-    const BigInt dB = BigIntUtils::fromHex(DB_HEX);
+    const BigInt dA = gost.generatePrivateKey();
+    const BigInt dB = gost.generatePrivateKey();
     const JacobianPoint QA = gost.publicKey(dA);
     const JacobianPoint QB = gost.publicKey(dB);
     const JacobianPoint sharedA = gost.ecdhShared(dA, QB);
@@ -52,26 +46,31 @@ int main() {
     const bool sameShared = ConstantTime::secureCompare(curve, sharedA, sharedB);
     std::cout << "ECDH_EQUAL=" << (sameShared ? "01" : "00") << '\n';
 
-    const BigInt hash = BigIntUtils::fromHex(HASH_HEX);
-    const BigInt d = BigIntUtils::fromHex(D_HEX);
-    const BigInt k = BigIntUtils::fromHex(K_HEX);
+    const BigInt d = gost.generatePrivateKey();
     const JacobianPoint Qsign = gost.publicKey(d);
-    const Signature sig = gost.signHash(hash, d, k);
+    const BigInt hash = gost.hashMessage(MESSAGE_HEX);
+    const Signature sig = gost.signMessage(MESSAGE_HEX, d);
+    const Signature sig2 = gost.signMessage(MESSAGE_HEX, d);
 
     printPoint("QSIGN", curve, Qsign);
     std::cout << "R=" << BigIntUtils::toFixedHex(sig.r, EllipticCurve::FIELD_BYTES) << '\n';
     std::cout << "S=" << BigIntUtils::toFixedHex(sig.s, EllipticCurve::FIELD_BYTES) << '\n';
 
-    const bool signatureOk = gost.verifyHash(hash, sig, Qsign);
+    const bool signatureOk = gost.verifyMessage(MESSAGE_HEX, sig, Qsign);
+    const bool signatureOk2 = gost.verifyMessage(MESSAGE_HEX, sig2, Qsign);
+    const bool signaturesDiffer = sig.r != sig2.r || sig.s != sig2.s;
+
     std::cout << "VERIFY=" << (signatureOk ? "01" : "00") << '\n';
+    std::cout << "VERIFY2=" << (signatureOk2 ? "01" : "00") << '\n';
+    std::cout << "SIGNATURES_DIFFER=" << (signaturesDiffer ? "01" : "00") << '\n';
 
     Signature damaged = sig;
     damaged.s ^= 0x01;
-    const bool damagedOk = gost.verifyHash(hash, damaged, Qsign);
+    const bool damagedOk = gost.verifyMessage(MESSAGE_HEX, damaged, Qsign);
     std::cout << "VERIFY_DAMAGED=" << (damagedOk ? "01" : "00") << '\n';
 
     std::cout << "MESSAGE_HEX=" << MESSAGE_HEX << '\n';
-    std::cout << "HASH_HEX=" << HASH_HEX << '\n';
+    std::cout << "HASH_HEX=" << BigIntUtils::toFixedHex(hash, EllipticCurve::FIELD_BYTES) << '\n';
 
     return 0;
 }
